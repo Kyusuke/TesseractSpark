@@ -4,13 +4,17 @@ package com.cap
 import java.awt.Image
 import java.awt.image.RenderedImage
 import java.io.ByteArrayOutputStream
+import java.net.URI
 import java.nio.ByteBuffer
 import java.util.List
 import javax.imageio.ImageIO
 
+import org.apache.commons.io.FilenameUtils
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.{HBaseConfiguration, TableName}
 import org.apache.hadoop.hbase.client.{ConnectionFactory, Put}
 import org.apache.hadoop.hbase.util.Bytes
+import org.apache.hadoop.security.UserGroupInformation
 import org.apache.spark.{SparkConf, SparkContext}
 import org.bytedeco.javacpp.lept._
 import org.bytedeco.javacpp.tesseract._
@@ -25,14 +29,31 @@ import scala.collection.mutable.StringBuilder
   */
 object TesseractSpark {
   def main(args: Array[String]) {
+    if (args.length != 2) {
+      System.err.println("Usage: *TesseractSpark.jar* <hdfs input dir> <hdfs output dir>")
+      System.err.println("Supply a hdfs address for input followed by an output dir e.g. hdfs://localhost/user/cloudera/pdf hdfs://localhost/user/cloudera/txtOutput")
+      System.exit(1)
+    }
 
-
+    if (dirExists(args(1)) != true) {
+      System.err.println("Dir doesn't exist, create the dir first before running the Spark job")
+      System.exit(1)
+    }
     val conf = new SparkConf().setAppName("IDMP Processor")
     val sc = new SparkContext(conf)
 
+    /*
+    /** Authenticating Kerberos principle */
+    System.out.println("Principal Authentication: ")
+    val kerUser = "cg10039@LOCALDOMAIN.GOV.UK"
+    val kerKeyPath = "/home/users/cg10039.keytab"
+    UserGroupInformation.loginUserFromKeytab(kerUser, kerKeyPath)
+    */
+
     /** Read in PDFs into the RDD */
-    val files = sc.binaryFiles ("hdfs://nameservice1/data/raw")
-    files.map(convertFunc(_)).count
+    val hdfsPath = args(0)
+    val files = sc.binaryFiles(hdfsPath)
+    files.map(convertFunc(_, args(1))).count
   }
 
 
@@ -107,13 +128,13 @@ object TesseractSpark {
     * @param PDF File(s) to process
     */
   def convertFunc (
-                    file: (String, org.apache.spark.input.PortableDataStream)
+                    file: (String, org.apache.spark.input.PortableDataStream), outputPath: String
                   ) : Unit  =
   {
     /** Render the PDF into a list of images with 300 dpi resolution
       * One image per PDF page, a PDF document may have multiple pages
       */
-    val document: PDFDocument = new PDFDocument( );
+    val document: PDFDocument = new PDFDocument( )
     document.load( file._2.open )
     file._2.close
     val renderer :SimpleRenderer = new SimpleRenderer( )
@@ -142,7 +163,27 @@ object TesseractSpark {
       api.End
     }
 
+    /*
     /** Write the generated data into HBase */
     populateHbase( file._1, r.toString( ), file._2 )
+    */
+
+    /** Write to HDFS as txt file */
+    writeToHDFS(outputPath, FilenameUtils.getBaseName(file._1), r.toString())
+  }
+
+  def dirExists(hdfsDirectory: String): Boolean = {
+    val hadoopConf = new org.apache.hadoop.conf.Configuration()
+    val fs = org.apache.hadoop.fs.FileSystem.get(hadoopConf)
+    val exists = fs.exists(new org.apache.hadoop.fs.Path(hdfsDirectory))
+    return exists
+  }
+
+  def writeToHDFS(outputPath: String, baseName: String, text: String): Unit = {
+    val uri = URI.create(outputPath + "/" + baseName + ".txt")
+    val conf = new Configuration()
+    val file = org.apache.hadoop.fs.FileSystem.get(uri, conf)
+    val in = file.create(new org.apache.hadoop.fs.Path(uri))
+    in.writeUTF(text)
   }
 }
