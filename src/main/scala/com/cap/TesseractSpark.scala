@@ -45,8 +45,8 @@ object TesseractSpark {
     /*
     /** Authenticating Kerberos principle */
     System.out.println("Principal Authentication: ")
-    val kerUser = "cg10039@LOCALDOMAIN.GOV.UK"
-    val kerKeyPath = "/home/users/cg10039.keytab"
+    val kerUser = "xxxxxx"
+    val kerKeyPath = "xxxxxx"
     UserGroupInformation.loginUserFromKeytab(kerUser, kerKeyPath)
     */
 
